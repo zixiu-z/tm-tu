@@ -98,16 +98,44 @@ git clone https://github.com/zixiu-z/tm-tu.git ~/code/tm-tu
 ln -s ~/code/tm-tu/temu-listing-images ~/.claude/skills/temu-listing-images
 ```
 
-### Windows（管理员 PowerShell）
+### Windows
 
-```powershell
-git clone https://github.com/zixiu-z/tm-tu.git $env:USERPROFILE\code\tm-tu
-New-Item -ItemType SymbolicLink `
-  -Path "$env:USERPROFILE\.claude\skills\temu-listing-images" `
-  -Target "$env:USERPROFILE\code\tm-tu\temu-listing-images"
+Windows 的符号链接**需要管理员权限或开发者模式**，普通账户会报
+「没有足够权限执行此操作」。用目录联接（Junction）替代，效果等同且无需提权：
+
+```cmd
+git clone https://github.com/zixiu-z/tm-tu.git %USERPROFILE%\code\tm-tu
+mklink /J %USERPROFILE%\.claude\skills\temu-listing-images %USERPROFILE%\code\tm-tu\temu-listing-images
 ```
 
-之后在 `~/code/tm-tu` 里 `git pull`，所有装了软链的设备自动生效。
+PowerShell 里调用 `cmd`：
+
+```powershell
+git clone https://github.com/zixiu-z/tm-tu.git "$env:USERPROFILE\code\tm-tu"
+cmd /c mklink /J "$env:USERPROFILE\.claude\skills\temu-listing-images" "$env:USERPROFILE\code\tm-tu\temu-listing-images"
+```
+
+若确实要用符号链接（`New-Item -ItemType SymbolicLink`），需以管理员身份运行，
+或开启「设置 → 隐私和安全性 → 开发者选项 → 开发人员模式」。
+
+### 验证
+
+```bash
+# 应能列出 SKILL.md / references / scripts / tests
+ls ~/.claude/skills/temu-listing-images
+```
+
+之后在 `~/code/tm-tu` 里 `git pull`，所有装了链接的设备自动生效。
+
+### 已实测
+
+在 Windows 普通账户下验证过：
+
+- `mklink /D`（符号链接）→ 权限不足，失败
+- `mklink /J`（目录联接）→ 成功，Skill 的相对路径引用正常解析，
+  `spec_audit.py` 通过 39/39
+- 双向同步：改克隆目录，链接路径立即可见；反向改链接路径，
+  克隆目录同步变化，`git status` 能正常追踪
 
 ---
 
@@ -181,3 +209,18 @@ curl -s -o /dev/null -w "%{http_code}\n" --max-time 8 https://github.com
 
 脚本已内置 UTF-8 reconfigure，Windows 控制台输出中文不会再崩。
 若仍遇 `UnicodeEncodeError`，设 `PYTHONIOENCODING=utf-8`。
+
+### 6. 换行符
+
+仓库用 `.gitattributes` 强制 LF。但若 Windows 全局设了
+`core.autocrlf=true`，检出时可能转成 CRLF，导致 `git status`
+出现大量「改动」其实只是换行差异。
+
+```bash
+git config --get core.autocrlf          # 若为 true
+git add --renormalize .                 # 按 .gitattributes 规范化
+git status --short                       # 应只剩真实改动
+```
+
+本项目已做过一次规范化（commit 34b3712）：`SKILL.md` 曾因早于
+`.gitattributes` 提交而存为 CRLF，现已统一为 LF。
