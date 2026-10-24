@@ -16,6 +16,9 @@ on:
 
 env:
   SKILL_DIR: temu-listing-images
+  # Windows 默认 cp1252，输出中文会 UnicodeEncodeError
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: "1"
 
 jobs:
   regression:
@@ -75,7 +78,7 @@ jobs:
                   [size // 2 - m // 2, size // 2 - m, size // 2 + m // 2, size // 2 + m],
                   radius=size // 20, fill=(120, 145, 120))
               im.save(os.path.join(d, f"sample-{i:02d}.jpg"), quality=95)
-          print("生成合成样例完成:", d)
+          print("synthetic samples written to:", d)
           PY
 
       - name: 注入 TEMU_SAMPLE_DIR

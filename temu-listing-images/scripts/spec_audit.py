@@ -17,6 +17,17 @@ import os
 import re
 import sys
 
+def _utf8_stdout():
+    """Windows 控制台默认 cp1252，输出中文会 UnicodeEncodeError。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
+_utf8_stdout()
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SPEC = os.path.join(HERE, "..", "references", "platform-specs.md")
 

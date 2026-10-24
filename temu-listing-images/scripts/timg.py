@@ -19,6 +19,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import timg_core as C
 import timg_ops as O
 
+def _utf8_stdout():
+    """Windows 控制台默认 cp1252，输出中文会 UnicodeEncodeError。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
+_utf8_stdout()
+
 
 def _check_args(a):
     ns = argparse.Namespace(
