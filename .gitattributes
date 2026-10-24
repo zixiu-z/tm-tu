@@ -1,0 +1,5 @@
+# 统一换行符为 LF，避免 Windows 检出后 CI 的 bash 脚本因 CRLF 出错
+* text=auto eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.py text eol=lf

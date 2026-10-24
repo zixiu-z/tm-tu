@@ -1,0 +1,151 @@
+name: skill-regression
+
+# 仓库根 = ~/.office-raccoon/agent/skills/
+# 被测 Skill 位于 temu-listing-images/，路径统一用 env.SKILL_DIR 引用。
+
+on:
+  push:
+    paths:
+      - "temu-listing-images/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "temu-listing-images/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+env:
+  SKILL_DIR: temu-listing-images
+
+jobs:
+  regression:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 安装依赖
+        run: python -m pip install --upgrade pip pillow numpy
+
+      # 样例目录优先级：CI 变量覆盖 > 仓库内 fixtures > 现场生成合成图
+      - name: 解析样例目录
+        id: sample
+        shell: bash
+        run: |
+          set -euo pipefail
+          FIX="${{ env.SKILL_DIR }}/tests/fixtures/sample-images"
+          if [ -n "${OVERRIDE:-}" ]; then
+            echo "dir=${OVERRIDE}" >> "$GITHUB_OUTPUT"
+            echo "使用 CI 变量覆盖：${OVERRIDE}"
+          elif [ -d "$FIX" ]; then
+            echo "dir=$(pwd)/$FIX" >> "$GITHUB_OUTPUT"
+            echo "使用仓库内 fixtures"
+          else
+            echo "dir=" >> "$GITHUB_OUTPUT"
+            echo "无 fixtures，将生成合成样例"
+          fi
+        env:
+          OVERRIDE: ${{ vars.TEMU_SAMPLE_DIR_OVERRIDE }}
+
+      - name: 生成本地合成样例（fixtures 不存在时）
+        if: steps.sample.outputs.dir == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          SKILL_DIR="${{ env.SKILL_DIR }}" python - <<'PY'
+          import os
+          from PIL import Image, ImageDraw
+          d = os.path.join(os.environ["SKILL_DIR"], "tests", "fixtures", "sample-images")
+          os.makedirs(d, exist_ok=True)
+          for i, (size, frac) in enumerate([(1200, 0.78), (1000, 0.72)]):
+              im = Image.new("RGB", (size, size), (255, 255, 255))
+              dr = ImageDraw.Draw(im)
+              m = int(size * frac * 0.5)
+              dr.rounded_rectangle(
+                  [size // 2 - m // 2, size // 2 - m, size // 2 + m // 2, size // 2 + m],
+                  radius=size // 20, fill=(120, 145, 120))
+              im.save(os.path.join(d, f"sample-{i:02d}.jpg"), quality=95)
+          print("生成合成样例完成:", d)
+          PY
+
+      - name: 注入 TEMU_SAMPLE_DIR
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="${{ steps.sample.outputs.dir }}"
+          if [ -z "$DIR" ] || [ ! -d "$DIR" ]; then
+            DIR="$(pwd)/${{ env.SKILL_DIR }}/tests/fixtures/sample-images"
+          fi
+          if [ ! -d "$DIR" ]; then
+            echo "::error::图片样例目录不存在: $DIR"
+            exit 1
+          fi
+          echo "TEMU_SAMPLE_DIR=$DIR" >> "$GITHUB_ENV"
+          echo "图片样例目录：$DIR"
+
+      - name: 运行完整回归
+        shell: bash
+        working-directory: ${{ env.SKILL_DIR }}
+        run: |
+          set -euo pipefail
+          echo "TEMU_SAMPLE_DIR=$TEMU_SAMPLE_DIR"
+          python tests/run_all.py
+
+      - name: 规格文档校验（独立复核）
+        shell: bash
+        working-directory: ${{ env.SKILL_DIR }}
+        run: python scripts/spec_audit.py --strict
+
+  # 明确验证「缺失即失败」，防止有人把默认值改回静默跳过
+  config-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pillow numpy
+
+      - name: 未设置 TEMU_SAMPLE_DIR 必须退出码 2
+        shell: bash
+        working-directory: ${{ env.SKILL_DIR }}
+        run: |
+          set +e
+          unset TEMU_SAMPLE_DIR
+          python tests/run_all.py > out.txt 2>&1
+          code=$?
+          cat out.txt
+          if [ "$code" -ne 2 ]; then
+            echo "::error::期望退出码 2（配置缺失），实际 $code"
+            exit 1
+          fi
+          echo "符合预期：缺失时退出码 2"
+
+      - name: 目录不存在必须退出码 2
+        shell: bash
+        working-directory: ${{ env.SKILL_DIR }}
+        run: |
+          set +e
+          TEMU_SAMPLE_DIR=/definitely/not/here python tests/run_all.py > out2.txt 2>&1
+          code=$?
+          cat out2.txt
+          if [ "$code" -ne 2 ]; then
+            echo "::error::期望退出码 2（目录不存在），实际 $code"
+            exit 1
+          fi
+          echo "符合预期：目录不存在时退出码 2"
+
+      - name: 显式降级必须可用且退出码 0
+        shell: bash
+        working-directory: ${{ env.SKILL_DIR }}
+        run: python tests/run_all.py --allow-missing-sample
