@@ -9,6 +9,8 @@
 | [`temu-listing-images`](temu-listing-images/) | 电商商品套图 SOP。以 Temu 全托管为主，兼容 Amazon / 淘宝天猫 / Shopee / Lazada / TikTok Shop / 小红书 / 拼多多 / 京东 / 抖店。含 CLI 校验与修复工具链。 |
 | `temu-full-managed-images` | 已废弃，内容整合进 `temu-listing-images`，保留仅为兼容旧引用。 |
 
+> **在别的设备上怎么用？** 见 [USAGE.md](USAGE.md) —— 只跑 CLI、装进 Agent、多设备同步三种方式。
+
 ## temu-listing-images
 
 ### 能力
