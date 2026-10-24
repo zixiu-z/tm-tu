@@ -35,7 +35,8 @@ def _check_args(a):
     ns = argparse.Namespace(
         min_size=a.min_size, min_coverage=a.min_coverage,
         max_coverage=a.max_coverage, max_mb=a.max_mb,
-        tolerance=a.tolerance, json=a.json)
+        tolerance=a.tolerance, json=a.json,
+        quiet=getattr(a, 'quiet', False))
     return ns
 
 
@@ -53,11 +54,16 @@ def main():
 
     c = sub.add_parser("check")
     c.add_argument("target")
+    c.add_argument("--workers", type=int, default=0,
+                   help="并发线程数，0=按 CPU 自动，1=串行")
+    c.add_argument("--quiet", action="store_true",
+                   help="只输出失败项与汇总（大批量时显著省时）")
     common(c)
 
     f = sub.add_parser("fix")
     f.add_argument("targets", nargs="+")
     f.add_argument("--out-dir", default="fixed")
+    f.add_argument("--workers", type=int, default=0)
     common(f)
 
     r = sub.add_parser("relayout")
@@ -106,6 +112,7 @@ def main():
     b.add_argument("--subhead", required=True)
     b.add_argument("--anchor", default="body", choices=["spigot", "body"])
     b.add_argument("--max-images", type=int, default=50)
+    b.add_argument("--workers", type=int, default=0)
 
     a = p.parse_args()
     ns = _check_args(a) if hasattr(a, "min_size") else None
@@ -115,19 +122,37 @@ def main():
         if not files:
             print("未找到图片")
             return 1
-        oks = [C.check_one(x, ns) for x in files]
+        # PIL/numpy 的解码与掩码会释放 GIL，多线程有真实收益
+        workers = a.workers if a.workers > 0 else min(16, (os.cpu_count() or 8))
+        if workers > 1 and len(files) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                oks = list(ex.map(lambda x: C.check_one(x, ns), files))
+        else:
+            oks = [C.check_one(x, ns) for x in files]
         if not a.json:
             print(f"\n{sum(oks)}/{len(oks)} passed")
         return 0 if all(oks) else 1
 
     if a.cmd == "fix":
         os.makedirs(a.out_dir, exist_ok=True)
-        ok = True
-        for src in a.targets:
-            if not os.path.isfile(src):
-                continue
+        workers = a.workers if a.workers > 0 else min(16, (os.cpu_count() or 8))
+
+        def _fix_one(src):
             dst = os.path.join(a.out_dir, os.path.basename(src))
             O.fix(src, dst, max_mb=a.max_mb)
+            return dst
+
+        todo = [s_ for s_ in a.targets if os.path.isfile(s_)]
+        if workers > 1 and len(todo) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                dsts = list(ex.map(_fix_one, todo))
+        else:
+            dsts = [_fix_one(s_) for s_ in todo]
+
+        ok = True
+        for dst in dsts:
             print(f"  -> {dst}")
             ok &= C.check_one(dst, ns)
         return 0 if ok else 1
@@ -166,15 +191,30 @@ def main():
     if a.cmd == "batch":
         os.makedirs(a.out_dir, exist_ok=True)
         files = C.images_at(a.in_dir)[: a.max_images]
-        ok = 0
-        for src in files:
+        workers = a.workers if a.workers > 0 else min(16, (os.cpu_count() or 8))
+
+        def _compose_one(src):
             name = os.path.splitext(os.path.basename(src))[0]
             dst = os.path.join(a.out_dir, f"{name}-benefit.png")
             try:
                 O.compose(src, dst, a.headline, a.subhead, a.anchor)
-                ok += 1
+                return True, name
             except SystemExit as e:
-                print(f"  跳过 {name}: {e}")
+                return False, f"{name}: {e}"
+
+        if workers > 1 and len(files) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                outcomes = list(ex.map(_compose_one, files))
+        else:
+            outcomes = [_compose_one(s_) for s_ in files]
+
+        ok = 0
+        for success, name in outcomes:
+            if success:
+                ok += 1
+            else:
+                print(f"  跳过 {name}")
         print(f"完成 {ok}/{len(files)}")
         return 0 if ok == len(files) else 1
 
