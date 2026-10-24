@@ -135,6 +135,7 @@ jobs:
           check "${{ env.SKILL_DIR }}/scripts/spec_audit.py"
           check "${{ env.SKILL_DIR }}/tests/run_all.py"
           check "${{ env.SKILL_DIR }}/tests/test_spec_audit.py"
+          check "${{ env.SKILL_DIR }}/tests/test_repo_sync.py"
           check ".github/workflows/skill-regression.yml"
           exit $fail
 

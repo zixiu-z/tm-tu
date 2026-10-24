@@ -139,6 +139,29 @@ ls ~/.claude/skills/temu-listing-images
 
 ---
 
+## 提交规则
+
+**任何修改都必须提交并推送到 GitHub**，不允许只改本地。
+
+改完跑一次同步守卫，确认没有遗漏：
+
+```bash
+cd temu-listing-images
+python tests/test_repo_sync.py       # 0=已同步 / 1=有未提交或未推送 / 3=无法判断
+```
+
+`tests/run_all.py` 末尾会自动调用它（仅提示，不改变退出码，避免 CI 浅克隆环境误判）。
+
+标准流程：
+
+```bash
+cd <仓库根>
+git add -A
+git commit -m "docs: 说明改了什么"
+git push
+# 然后去 Actions 看 CI 是否全绿
+```
+
 ## 跨设备改完怎么同步回去
 
 ```bash

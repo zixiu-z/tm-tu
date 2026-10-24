@@ -108,6 +108,14 @@ def main():
 
     total, passed = len(results), sum(results)
     print(f"\n{'-' * 56}\n汇总：{passed}/{total} 环节通过")
+
+    # 同步守卫：提醒未提交/未推送的改动。仅提示，不改变退出码，
+    # 以免 CI 环境（浅克隆、无上游跟踪）被误判失败。
+    guard = os.path.join(HERE, "test_repo_sync.py")
+    if os.path.isfile(guard):
+        print(f"\n{'-' * 56}\n仓库同步状态")
+        subprocess.run([sys.executable, guard])
+
     return 0 if passed == total else 1
 
 
