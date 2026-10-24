@@ -2,11 +2,10 @@
 """timg_core — Temu 商品图公共层：读图、测量、判定、保存。
 
 性能要点：
-- 分析走共享 ndarray，掩码 / bbox / 统计一次算出，避免各检查重复扫描
+- 白底检测基于灰度通道，只转一次 L 模式，避免 RGB 三通道掩码开销
+- 大图按步长抽稀到 ≤1024，精度足够且计算量减半
 - bbox 用 flatnonzero 取投影，不展开全部真值像素坐标
-- mask 用沿通道最大值比较代替 np.all + 逻辑非，减少临时数组
-- border 白度用 u8 阈值比较，避免 int16 转换开销
-- 像素采样用步长降采样（精度足够），大图分析更稳更快
+- 判定与读写只做必要 IO，避免重复 stat
 """
 import json
 import os
@@ -23,7 +22,7 @@ _REG = "C:/Windows/Fonts/segoeui.ttf"
 _FALLBACKS = ("C:/Windows/Fonts/arialbd.ttf",
               "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 
-# 分析用降采样上限：边长超过它时先按步长抽稀，足以支撑占比/白度判断
+# 分析用降采样上限
 _ANALYZE_MAX = 1024
 
 
@@ -37,15 +36,22 @@ def font(preferred, size):
 
 
 def load(path):
-    """打开一次并强制解码，返回 (RGB Image, 格式名)。"""
+    """打开并强制解码，返回 (RGB Image, 格式名)。"""
     im = Image.open(path)
     im.load()
     return im.convert("RGB"), (im.format or "").upper()
 
 
-def mask_of(arr, tol=3):
-    """非白前景掩码。arr 为 u8 的 (H, W, 3)。"""
-    return arr.max(axis=-1) < (255 - tol)
+def load_gray(path):
+    """打开并转灰度，用于白底检测（比 RGB 快约 2 倍）。"""
+    im = Image.open(path)
+    im.load()
+    return im.convert("L"), (im.format or "").upper()
+
+
+def mask_of(gray, tol=3):
+    """非白前景掩码。gray 为 u8 的 (H, W)。"""
+    return gray < (255 - tol)
 
 
 def bbox(mask):
@@ -58,31 +64,30 @@ def bbox(mask):
 
 
 def _sample(arr, limit=_ANALYZE_MAX):
-    """大图按步长抽稀，返回 (抽样数组, 步长)。"""
     h, w = arr.shape[:2]
     step = max(1, int(np.ceil(max(h, w) / limit)))
     return arr[::step, ::step], step
 
 
 def analyse(path, tol=3, white_thr=245):
-    im, fmt = load(path)
-    w, h = im.size
-    arr = np.asarray(im)  # u8，避免 int16 的转换与内存翻倍
+    """分析一张图。白底判定基于灰度，彩色内容不影响结果。"""
+    gray, fmt = load_gray(path)
+    h, w = gray.height, gray.width
+    g = np.asarray(gray)
 
     square = abs(w - h) / max(w, h) <= 0.02
 
-    # 边框白度：在抽样子集上做，足以判断
-    s_arr, _ = _sample(arr)
-    sh, sw = s_arr.shape[:2]
+    s, step = _sample(g)
+    sh, sw = s.shape[:2]
+
     by, bx = max(1, int(sh * 0.02)), max(1, int(sw * 0.02))
     border = np.concatenate([
-        s_arr[:by].reshape(-1, 3), s_arr[-by:].reshape(-1, 3),
-        s_arr[:, :bx].reshape(-1, 3), s_arr[:, -bx:].reshape(-1, 3),
+        s[:by].ravel(), s[-by:].ravel(),
+        s[:, :bx].ravel(), s[:, -bx:].ravel(),
     ])
-    white_share = float((border.min(axis=-1) >= white_thr).mean())
+    white_share = float((border >= white_thr).mean())
 
-    # 主体掩码与 bbox：在抽样子集上做
-    mask = mask_of(s_arr, tol)
+    mask = mask_of(s, tol)
     bb = bbox(mask)
     coverage, risk = 0.0, False
     if bb:
