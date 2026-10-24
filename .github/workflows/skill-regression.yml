@@ -8,10 +8,14 @@ on:
     paths:
       - "temu-listing-images/**"
       - ".github/workflows/**"
+      - "README.md"
+      - "USAGE.md"
   pull_request:
     paths:
       - "temu-listing-images/**"
       - ".github/workflows/**"
+      - "README.md"
+      - "USAGE.md"
   workflow_dispatch:
 
 env:
@@ -108,6 +112,31 @@ jobs:
         shell: bash
         working-directory: ${{ env.SKILL_DIR }}
         run: python scripts/spec_audit.py --strict
+
+      # 文档里引用的路径必须真实存在，避免说明与实际结构漂移
+      - name: 校验文档引用的路径
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          check() {
+            if [ ! -e "$1" ]; then
+              echo "::error::文档引用的路径不存在: $1"
+              fail=1
+            else
+              echo "ok: $1"
+            fi
+          }
+          check "USAGE.md"
+          check "${{ env.SKILL_DIR }}/SKILL.md"
+          check "${{ env.SKILL_DIR }}/references/platform-specs.md"
+          check "${{ env.SKILL_DIR }}/references/prompt-templates.md"
+          check "${{ env.SKILL_DIR }}/scripts/timg.py"
+          check "${{ env.SKILL_DIR }}/scripts/spec_audit.py"
+          check "${{ env.SKILL_DIR }}/tests/run_all.py"
+          check "${{ env.SKILL_DIR }}/tests/test_spec_audit.py"
+          check ".github/workflows/skill-regression.yml"
+          exit $fail
 
   # 明确验证「缺失即失败」，防止有人把默认值改回静默跳过
   config-guard:
