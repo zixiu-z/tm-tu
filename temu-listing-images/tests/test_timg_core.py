@@ -113,6 +113,24 @@ class AnalyseTest(unittest.TestCase):
         expect = round(os.path.getsize(p) / (1024 * 1024), 2)
         self.assertEqual(C.analyse(p)["mb"], expect)
 
+    def test_large_jpeg_uses_decoder_draft(self):
+        """大 JPEG 应在解码阶段缩小，避免先解完整 2400px 图。"""
+        p = make_image(self._p("large.jpg"), (2400, 2400),
+                       [(360, 360, 2040, 2040)])
+        gray, fmt, original = C.load_gray(p, C._ANALYZE_MAX)
+        self.assertEqual(fmt, "JPEG")
+        self.assertEqual(original, (2400, 2400))
+        self.assertLessEqual(max(gray.size), 1200)  # JPEG 原生 1/2 draft
+
+    def test_near_coverage_boundary_rechecks_full_precision(self):
+        """快速估算落到阈值附近时，最终值必须等于全精度测量。"""
+        p = make_image(self._p("edge.jpg"), (2400, 2400),
+                       [(361, 361, 2039, 2039)])  # 约 0.699，靠近 0.70
+        full, _, _ = C.load_gray(p)
+        _, expected, _ = C._measure(full, 3, 245)
+        r = C.analyse(p, coverage_bounds=(0.70, 0.85))
+        self.assertEqual(r["coverage"], round(expected, 4))
+
 
 class RiskDetectionTest(unittest.TestCase):
     """水印/残留检测。
