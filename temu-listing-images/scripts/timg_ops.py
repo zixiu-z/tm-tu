@@ -22,7 +22,7 @@ def fix(path, outp, tol=3, target_cov=0.78, max_mb=2.0):
         arr[bg] = 255
         im = Image.fromarray(arr.astype(np.uint8))
 
-    bb = bbox(mask_of(np.asarray(im).astype(np.int16), tol))
+    bb = bbox(mask_of(np.asarray(im.convert("L")), tol))
     if bb:
         obj = im.crop(bb)
         ow, oh = obj.size
@@ -45,7 +45,7 @@ def relayout(src, outp, ratio=1.71, coverage=0.78, side=2048,
              strip_corner=False, tol=3, max_mb=2.0):
     im, _ = load(src)
     w, h = im.size
-    m = mask_of(np.asarray(im).astype(np.int16), tol)
+    m = mask_of(np.asarray(im.convert("L")), tol)
     if strip_corner:
         m[int(h * 0.90):, int(w * 0.80):] = False
     bb = bbox(m)
@@ -81,7 +81,7 @@ def compose(main, outp, headline, subhead, anchor="spigot", ratio=1.71,
             side=2048, product_cov=0.62, max_mb=2.0):
     """复用主图产品像素 + 文字层，避免重新生成导致产品漂移。"""
     im, _ = load(main)
-    bb = bbox(mask_of(np.asarray(im).astype(np.int16), 3))
+    bb = bbox(mask_of(np.asarray(im.convert("L")), 3))
     if not bb:
         raise SystemExit("主图中未找到产品")
     subj = im.crop(bb)
