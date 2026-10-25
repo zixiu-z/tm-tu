@@ -164,10 +164,12 @@ python tests/run_all.py                 # 一键回归：规格校验 + 测试 +
 TEMU_SAMPLE_DIR=/path/to/deliver python tests/run_all.py
 
 # Windows CMD
-set TEMU_SAMPLE_DIR=D:\path	o\deliver && python testsun_all.py
+set TEMU_SAMPLE_DIR=D:\path	o\deliver && python tests
+un_all.py
 
 # Windows PowerShell
-$env:TEMU_SAMPLE_DIR = 'D:\path	o\deliver'; python testsun_all.py
+$env:TEMU_SAMPLE_DIR = 'D:\path	o\deliver'; python tests
+un_all.py
 ```
 
 本地临时调试可显式降级（CI 中禁止使用）：
@@ -197,7 +199,13 @@ python scripts/timg.py check out/ --min-coverage 0.70 --max-coverage 0.85
 | format | JPG/PNG |
 | file_size | ≤2MB |
 | coverage | 0.70–0.85（白底主图类） |
-| risk | 主体框外无游离非白像素（文字/水印残留） |
+| risk | 主体框外无游离非白像素（文字/水印残留）——**当前实现失效，见下方缺陷说明，不可依赖** |
+
+> **已知缺陷（2026-10-25）**：`risk` 实际恒为 `False`。`analyse()` 用 `bbox(mask)` 由**全部**非白像素求包围盒，任何“框外残留”都会被纳入框内，导致 `outside` 恒等于 0，判定分支永不触发。已由 `tests/test_timg_core.py::RiskDetectionTest` 钉住现状。
+>
+> 影响：水印/残留文字**不会被自动拦下**，第 1 行合规要求目前只能靠人眼执行（见下文“人眼过三遍”）。
+> 修复方向：主体框应来自主体连通域（或去掉最大离群簇），而非全掩码投影。此处未擅自改动，待与上游确认口径。
+
 
 脚本只量几何，画面还要人眼过三遍：
 

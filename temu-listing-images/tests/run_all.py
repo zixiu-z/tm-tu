@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""一键回归：规格文档校验 + 校验器测试 + 图片质检。
+"""一键回归：规格文档校验 + 校验器测试 + 核心层测试 + 图像操作测试 + 图片质检。
 
     python tests/run_all.py
     TEMU_SAMPLE_DIR=/path/to/images python tests/run_all.py
@@ -86,23 +86,31 @@ def main():
                     help="TEMU_SAMPLE_DIR 缺失时降级为跳过（仅本地调试）")
     args = ap.parse_args()
 
-    print("[INFO] 1/3 规格文档校验")
-    results = [step("1/3 规格文档校验",
+    print("[INFO] 1/5 规格文档校验")
+    results = [step("1/5 规格文档校验",
                     [sys.executable, "scripts/spec_audit.py"])]
 
-    print("\n[INFO] 2/3 校验器回归测试")
-    results.append(step("2/3 校验器回归测试",
+    print("\n[INFO] 2/5 校验器回归测试")
+    results.append(step("2/5 校验器回归测试",
                         [sys.executable, "tests/test_spec_audit.py"]))
 
-    print("\n[INFO] 3/3 图片质检")
+    print("\n[INFO] 3/5 核心层回归测试")
+    results.append(step("3/5 核心层回归测试",
+                        [sys.executable, "tests/test_timg_core.py"]))
+
+    print("\n[INFO] 4/5 图像操作回归测试")
+    results.append(step("4/5 图像操作回归测试",
+                        [sys.executable, "tests/test_timg_ops.py"]))
+
+    print("\n[INFO] 5/5 图片质检")
     sample, code = resolve_sample(args.allow_missing_sample)
     if code is not None:
         print(f"\n{'-' * 56}\n汇总：配置缺失，管线中止（退出码 {code}）")
         return code
     if sample is None:
-        print("\n[跳过] 3/3 图片质检")
+        print("\n[跳过] 5/5 图片质检")
     else:
-        results.append(step("3/3 图片质检（示例批次）",
+        results.append(step("5/5 图片质检（示例批次）",
                             [sys.executable, "scripts/timg.py", "check", sample,
                              "--min-coverage", "0", "--max-coverage", "1"]))
 
