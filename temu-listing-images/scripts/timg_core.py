@@ -22,8 +22,10 @@ _REG = "C:/Windows/Fonts/segoeui.ttf"
 _FALLBACKS = ("C:/Windows/Fonts/arialbd.ttf",
               "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 
-# 分析用降采样上限
+# 分析用降采样上限。JPEG 在解码阶段直接 draft 到该尺寸，避免先解完整大图。
 _ANALYZE_MAX = 1024
+# 快速估算距离覆盖率阈值小于该值时，以全精度复核，防止边界误判。
+_COVERAGE_RECHECK_MARGIN = 0.006
 
 
 def font(preferred, size):
@@ -42,11 +44,20 @@ def load(path):
     return im.convert("RGB"), (im.format or "").upper()
 
 
-def load_gray(path):
-    """打开并转灰度，用于白底检测（比 RGB 快约 2 倍）。"""
+def load_gray(path, draft_limit=None):
+    """打开并转灰度；JPEG 可在解码阶段缩到 draft_limit 附近。
+
+    Pillow 的 JPEG ``draft`` 使用解码器原生 1/2、1/4、1/8 缩放，避免先解
+    完整大图再抽样。PNG/WebP 不支持时会自动维持原尺寸，语义不变。
+    返回 (灰度图, 格式名, 原始尺寸)。
+    """
     im = Image.open(path)
+    fmt = (im.format or "").upper()
+    original_size = im.size
+    if draft_limit and max(original_size) > draft_limit:
+        im.draft("L", (draft_limit, draft_limit))
     im.load()
-    return im.convert("L"), (im.format or "").upper()
+    return im.convert("L"), fmt, original_size
 
 
 def mask_of(gray, tol=3):
@@ -69,23 +80,19 @@ def _sample(arr, limit=_ANALYZE_MAX):
     return arr[::step, ::step], step
 
 
-def analyse(path, tol=3, white_thr=245):
-    """分析一张图。白底判定基于灰度，彩色内容不影响结果。"""
-    gray, fmt = load_gray(path)
-    h, w = gray.height, gray.width
-    g = np.asarray(gray)
-
-    square = abs(w - h) / max(w, h) <= 0.02
-
-    s, step = _sample(g)
-    sh, sw = s.shape[:2]
-
+def _measure(gray, tol, white_thr):
+    """测量已解码灰度图，返回白边占比、主体占比和风险标记。"""
+    s, _ = _sample(np.asarray(gray))
+    sh, sw = s.shape
     by, bx = max(1, int(sh * 0.02)), max(1, int(sw * 0.02))
-    border = np.concatenate([
-        s[:by].ravel(), s[-by:].ravel(),
-        s[:, :bx].ravel(), s[:, -bx:].ravel(),
-    ])
-    white_share = float((border >= white_thr).mean())
+
+    # 分别计数四条边，避免 concatenate 产生额外数组和内存拷贝。
+    white = (np.count_nonzero(s[:by] >= white_thr)
+             + np.count_nonzero(s[-by:] >= white_thr)
+             + np.count_nonzero(s[:, :bx] >= white_thr)
+             + np.count_nonzero(s[:, -bx:] >= white_thr))
+    border_pixels = by * sw * 2 + bx * sh * 2
+    white_share = float(white / border_pixels)
 
     mask = mask_of(s, tol)
     bb = bbox(mask)
@@ -96,7 +103,22 @@ def analyse(path, tol=3, white_thr=245):
         if white_share >= 0.9:
             outside = int(mask.sum()) - int(mask[y0:y1, x0:x1].sum())
             risk = outside / mask.size > 0.002
+    return white_share, coverage, risk
 
+
+def analyse(path, tol=3, white_thr=245, coverage_bounds=None):
+    """快速分析一张图；阈值附近自动全精度复核，避免降采样误判。"""
+    gray, fmt, (w, h) = load_gray(path, _ANALYZE_MAX)
+    white_share, coverage, risk = _measure(gray, tol, white_thr)
+
+    if coverage_bounds and fmt in ("JPEG", "JPG"):
+        near_boundary = any(abs(coverage - bound) < _COVERAGE_RECHECK_MARGIN
+                            for bound in coverage_bounds)
+        if near_boundary and gray.size != (w, h):
+            full, _, _ = load_gray(path)
+            white_share, coverage, risk = _measure(full, tol, white_thr)
+
+    square = abs(w - h) / max(w, h) <= 0.02
     return {
         "file": os.path.basename(path), "format": fmt,
         "width": w, "height": h, "square": square,
@@ -139,7 +161,8 @@ def save(im, path, max_mb=2.0):
 
 
 def check_one(path, args):
-    r = analyse(path, args.tolerance)
+    r = analyse(path, args.tolerance,
+                coverage_bounds=(args.min_coverage, args.max_coverage))
     checks = judge(r, args.min_size, args.min_coverage, args.max_coverage, args.max_mb)
     ok = all(c["pass"] for c in checks)
     if args.json:
